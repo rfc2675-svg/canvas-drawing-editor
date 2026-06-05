@@ -15,6 +15,8 @@
   </script>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- 引入编辑器（本地构建版本，支持画板模式） -->
+  <!-- <script src="../dist/canvas-drawing-editor.umd.js"></script> -->
   <!-- CDN 引入编辑器 -->
   <script src="https://unpkg.com/canvas-drawing-editor@latest/dist/canvas-drawing-editor.umd.js"></script>
   <style>
@@ -91,6 +93,16 @@
       border: 2px solid #e5e7eb;
       cursor: pointer;
     }
+    .preset-size-btn {
+      transition: all 0.15s;
+      border: 1px solid transparent;
+    }
+    .preset-size-btn:hover {
+      border-color: #fb923c;
+    }
+    .preset-size-btn:active {
+      transform: scale(0.97);
+    }
   </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -121,6 +133,7 @@
               lang="zh"
               theme-color="#5450dc"
               enable-hotzone="true"
+              canvas-size='{"width":800,"height":600}'
             ></canvas-drawing-editor>
           </div>
         </div>
@@ -169,6 +182,53 @@
               <div class="flex items-center justify-between">
                 <label class="text-xs text-gray-500">enable-hotzone (热区功能)</label>
                 <div id="config-hotzone" class="toggle-switch active" onclick="toggleSwitch(this, 'hotzone')"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 画布尺寸（画板模式） -->
+          <div class="config-section">
+            <h3 class="font-semibold text-gray-700 mb-3 text-sm">
+              <i class="fas fa-expand-arrows-alt text-orange-500 mr-2"></i>画布尺寸 (canvas-size)
+            </h3>
+
+            <div class="space-y-3">
+              <!-- 画板模式开关 -->
+              <div class="flex items-center justify-between">
+                <label class="text-xs text-gray-500">启用画板模式</label>
+                <div id="config-artboard" class="toggle-switch active" onclick="toggleArtboard(this)"></div>
+              </div>
+
+              <!-- 预设尺寸 -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">预设尺寸</label>
+                <div class="grid grid-cols-2 gap-1">
+                  <button onclick="setCanvasSize(800, 600)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">800×600</button>
+                  <button onclick="setCanvasSize(1024, 768)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">1024×768</button>
+                  <button onclick="setCanvasSize(1920, 1080)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">16:9 (1920×1080)</button>
+                  <button onclick="setCanvasSize(1280, 720)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">16:9 (1280×720)</button>
+                  <button onclick="setCanvasSize(1080, 1920)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">9:16 (1080×1920)</button>
+                  <button onclick="setCanvasSize(1024, 1024)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">1:1 (1024×1024)</button>
+                  <button onclick="setCanvasSize(794, 1123)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">A4 (794×1123)</button>
+                  <button onclick="setCanvasSize(1123, 794)" class="preset-size-btn p-1.5 bg-gray-50 rounded text-xs text-gray-600 hover:bg-orange-50 hover:text-orange-600 transition">A4 横向</button>
+                </div>
+              </div>
+
+              <!-- 自定义尺寸 -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">自定义尺寸 (px)</label>
+                <div class="flex items-center gap-2">
+                  <input type="number" id="config-canvas-w" value="800" min="1" class="config-input text-center" placeholder="宽" style="width: 80px;">
+                  <span class="text-gray-400 text-xs">×</span>
+                  <input type="number" id="config-canvas-h" value="600" min="1" class="config-input text-center" placeholder="高" style="width: 80px;">
+                  <button onclick="applyCustomCanvasSize()" class="px-3 py-2 bg-orange-500 text-white rounded text-xs hover:bg-orange-600 transition">应用</button>
+                </div>
+              </div>
+
+              <!-- 当前尺寸显示 -->
+              <div class="text-xs text-gray-400 bg-gray-50 rounded p-2">
+                <i class="fas fa-info-circle mr-1"></i>
+                当前画板: <span id="current-canvas-size" class="font-mono text-orange-600">800 × 600</span>
               </div>
             </div>
           </div>
@@ -373,8 +433,8 @@
     const eventLog = document.getElementById('eventLog');
     let objectCounter = 0;
 
-    // 初始化数据（包含热区演示）
-    const initialData = {"version":"1.0","objects":[{"id":"wz2l1bxl0","type":"TEXT","x":360,"y":72.8,"text":"点击左侧工具栏，点击文本，输入文字，然后回车","fontSize":18,"color":"#000000","lineWidth":3},{"id":"6wake714g","type":"TEXT","x":264,"y":187,"text":"然后点击文字右键，建立变量，可实现热区功能，效果如下","fontSize":20,"color":"#000000","lineWidth":3},{"id":"alik5bh8k","type":"ARROW","x":551,"y":91,"x2":550,"y2":141,"color":"#000000","lineWidth":3,"lineStyle":"solid","arrowType":"single"},{"id":"kvaqjqu9e","type":"ARROW","x":549,"y":211,"x2":550,"y2":258,"color":"#000000","lineWidth":3,"lineStyle":"solid","arrowType":"single"},{"id":"wrtk46qxs","type":"TEXT","x":365,"y":306,"text":"xxxx","fontSize":24,"color":"#000000","lineWidth":3,"hotzone":{"variableName":"text1","description":"这是一个时间戳的实现"}},{"id":"xhhtl7bye","type":"RECTANGLE","x":573,"y":294,"width":0,"height":0,"color":"#000000","lineWidth":3,"lineStyle":"solid"},{"id":"5jvls3dyu","type":"RECTANGLE","x":543,"y":291,"width":0,"height":0,"color":"#000000","lineWidth":3,"lineStyle":"solid"},{"id":"0qbqfvl8d","type":"RECTANGLE","x":543,"y":291,"width":0,"height":0,"color":"#000000","lineWidth":3,"lineStyle":"solid"},{"id":"f7db60j4r","type":"RECTANGLE","x":570,"y":317,"width":0,"height":0,"color":"#000000","lineWidth":3,"lineStyle":"solid"}]};
+    // 初始化数据（画板 800×600 范围内，包含热区演示）
+    const initialData = {"version":"1.0","objects":[{"id":"wz2l1bxl0","type":"TEXT","x":180,"y":60,"text":"点击左侧工具栏，点击文本，输入文字，然后回车","fontSize":16,"color":"#000000","lineWidth":3},{"id":"6wake714g","type":"TEXT","x":120,"y":150,"text":"然后点击文字右键，建立变量，可实现热区功能","fontSize":16,"color":"#000000","lineWidth":3},{"id":"alik5bh8k","type":"ARROW","x":420,"y":75,"x2":420,"y2":120,"color":"#000000","lineWidth":3,"lineStyle":"solid","arrowType":"single"},{"id":"kvaqjqu9e","type":"ARROW","x":420,"y":170,"x2":420,"y2":210,"color":"#000000","lineWidth":3,"lineStyle":"solid","arrowType":"single"},{"id":"wrtk46qxs","type":"TEXT","x":260,"y":240,"text":"xxxx","fontSize":24,"color":"#000000","lineWidth":3,"hotzone":{"variableName":"text1","description":"这是一个时间戳的实现"}},{"id":"demo-rect","type":"RECTANGLE","x":80,"y":350,"width":160,"height":100,"color":"#3b82f6","lineWidth":2,"lineStyle":"solid","fillMode":"both"},{"id":"demo-circle","type":"CIRCLE","x":400,"y":400,"radius":50,"color":"#ef4444","lineWidth":2,"fillMode":"both"},{"id":"demo-star","type":"STAR","x":600,"y":150,"outerRadius":40,"innerRadius":20,"points":5,"color":"#f59e0b","lineWidth":2,"fillMode":"both"}]};
 
     // 获取当前时间问候语
     function getGreeting() {
@@ -424,8 +484,50 @@
       arrow: true, polygon: true, text: true, image: true,
       undo: true, redo: true, zoom: true, color: true,
       download: true, exportJson: true, importJson: true, clear: true,
-      layers: true, group: true, align: true, shapePanel: true
+      layers: true, group: true, align: true, shapePanel: true, canvasSize: true
     };
+
+    // 画板状态
+    let artboardEnabled = true;
+    let artboardWidth = 800;
+    let artboardHeight = 600;
+
+    // 设置画布尺寸
+    function setCanvasSize(w, h) {
+      artboardWidth = w;
+      artboardHeight = h;
+      artboardEnabled = true;
+      document.getElementById('config-artboard').classList.add('active');
+      document.getElementById('config-canvas-w').value = w;
+      document.getElementById('config-canvas-h').value = h;
+      editor.setAttribute('canvas-size', JSON.stringify({ width: w, height: h }));
+      document.getElementById('current-canvas-size').textContent = `${w} × ${h}`;
+      log(`画板尺寸: ${w}×${h}`);
+    }
+
+    // 应用自定义画布尺寸
+    function applyCustomCanvasSize() {
+      const w = parseInt(document.getElementById('config-canvas-w').value);
+      const h = parseInt(document.getElementById('config-canvas-h').value);
+      if (w > 0 && h > 0) {
+        setCanvasSize(w, h);
+      } else {
+        log('请输入有效的宽高值', 'warn');
+      }
+    }
+
+    // 切换画板模式
+    function toggleArtboard(el) {
+      el.classList.toggle('active');
+      artboardEnabled = el.classList.contains('active');
+      if (artboardEnabled) {
+        setCanvasSize(artboardWidth, artboardHeight);
+      } else {
+        editor.removeAttribute('canvas-size');
+        document.getElementById('current-canvas-size').textContent = '全屏模式';
+        log('画板模式已关闭，切换为全屏画布');
+      }
+    }
 
     // 日志函数
     function log(message, type = 'info') {
@@ -444,6 +546,11 @@
     });
     document.addEventListener('animation-complete', (e) => {
       log(`动画完成: ${e.detail.tweenId}`);
+    });
+    document.addEventListener('canvas-size-change', (e) => {
+      const { width, height } = e.detail;
+      document.getElementById('current-canvas-size').textContent = `${width} × ${height}`;
+      log(`🎨 画板尺寸变更: ${width}×${height}`);
     });
 
     // 更新编辑器配置
@@ -501,9 +608,11 @@
       return colors[Math.floor(Math.random() * colors.length)];
     }
 
-    // 生成随机位置
+    // 生成随机位置（在画板范围内）
     function randomPos() {
-      return { x: 100 + Math.random() * 400, y: 100 + Math.random() * 300 };
+      const maxX = artboardEnabled ? artboardWidth - 100 : 600;
+      const maxY = artboardEnabled ? artboardHeight - 100 : 500;
+      return { x: 50 + Math.random() * Math.max(maxX - 50, 100), y: 50 + Math.random() * Math.max(maxY - 50, 100) };
     }
 
     // 添加矩形
@@ -856,8 +965,9 @@
       log(`形状已添加: ${e.detail.shape.name}`);
     });
 
-    log('编辑器已加载，热区功能已启用！');
+    log('编辑器已加载，画板模式 800×600，热区功能已启用！');
     log('画布中的「文本内容」会实时显示当前时间和问候语');
+    log('右键点击图片可编辑尺寸，插入图片可勾选「填充画布」');
   </script>
 </body>
 </html>

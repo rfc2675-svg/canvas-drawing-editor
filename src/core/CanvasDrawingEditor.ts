@@ -408,6 +408,7 @@ export interface ToolConfig {
   group?: boolean;        // 组合/解组
   align?: boolean;        // 对齐/分布
   shapePanel?: boolean;   // 形状选择器面板
+  canvasSize?: boolean;   // 画布尺寸控制
 }
 
 export interface EditorConfig {
@@ -432,6 +433,8 @@ export interface EditorConfig {
   enableHotzone?: boolean; // 是否启用热区功能，默认false（管理员开启，用户端关闭）
   // 图片大小限制（单位：KB，0或不设置表示不限制）
   maxImageSize?: number;
+  // 画布尺寸（artboard模式）
+  canvasSize?: { width: number; height: number };
 }
 
 // 国际化文本
@@ -577,6 +580,13 @@ const i18n: Record<LangType, Record<string, string>> = {
     imageSizeExceeded: '图片大小超出限制',
     imageSizeLimit: '最大允许',
     currentImageSize: '当前图片大小',
+    // 画布尺寸
+    canvasSize: '画布尺寸',
+    editSize: '编辑尺寸',
+    imageWidth: '宽度',
+    imageHeight: '高度',
+    fillArtboard: '填充画布',
+    disableArtboard: '取消固定尺寸',
   },
   en: {
     select: 'Select (V)',
@@ -719,6 +729,13 @@ const i18n: Record<LangType, Record<string, string>> = {
     imageSizeExceeded: 'Image size exceeded',
     imageSizeLimit: 'Maximum allowed',
     currentImageSize: 'Current image size',
+    // Canvas size
+    canvasSize: 'Canvas Size',
+    editSize: 'Edit Size',
+    imageWidth: 'Width',
+    imageHeight: 'Height',
+    fillArtboard: 'Fill Artboard',
+    disableArtboard: 'Disable Fixed Size',
   },
 };
 
@@ -761,6 +778,7 @@ const defaultToolConfig: ToolConfig = {
   group: true,
   align: true,
   shapePanel: true,
+  canvasSize: true,
 };
 
 // 默认配置
@@ -900,6 +918,12 @@ export class CanvasDrawingEditor extends HTMLElement {
   private panStart: Point = { x: 0, y: 0 };
   private isSpacePressed: boolean = false;  // 空格键按下状态
 
+  // 画板（Artboard）模式
+  private artboardEnabled: boolean = false;
+  private artboardWidth: number = 800;
+  private artboardHeight: number = 600;
+  private contextMenuEditingImageId: string | null = null;
+
   // 绑定的事件处理器（用于移除监听）
   private boundHandleResize: () => void;
   private boundHandleKeyDown: (e: KeyboardEvent) => void;
@@ -961,7 +985,7 @@ export class CanvasDrawingEditor extends HTMLElement {
   static get observedAttributes(): string[] {
     return [
       'title', 'tool-config', 'initial-data', 'lang', 'theme-color',
-      'enable-hotzone', 'hotzone-data', 'max-image-size',
+      'enable-hotzone', 'hotzone-data', 'max-image-size', 'canvas-size',
       // 旧属性（向后兼容）
       'show-pencil', 'show-rectangle', 'show-circle', 'show-text',
       'show-image', 'show-zoom', 'show-download', 'show-export', 'show-import',
@@ -1019,7 +1043,7 @@ export class CanvasDrawingEditor extends HTMLElement {
     }
 
     // 需要重新渲染 UI 的属性
-    const rerenderAttributes = ['title', 'lang', 'theme-color', 'tool-config', 'enable-hotzone',
+    const rerenderAttributes = ['title', 'lang', 'theme-color', 'tool-config', 'enable-hotzone', 'canvas-size',
       'show-pencil', 'show-rectangle', 'show-circle', 'show-text', 'show-image', 'show-zoom',
       'show-download', 'show-export', 'show-import', 'show-color', 'show-clear', 'show-line',
       'show-arrow', 'show-polygon', 'show-undo', 'show-redo', 'show-layers', 'show-group', 'show-align'];
@@ -1133,6 +1157,25 @@ export class CanvasDrawingEditor extends HTMLElement {
       enableHotzone: this.getAttribute('enable-hotzone') === 'true',
       maxImageSize: this.parseMaxImageSize(),
     };
+
+    // 解析画布尺寸（artboard模式）
+    const canvasSizeAttr = this.getAttribute('canvas-size');
+    if (canvasSizeAttr) {
+      try {
+        const parsed = JSON.parse(canvasSizeAttr);
+        if (parsed.width > 0 && parsed.height > 0) {
+          this.artboardEnabled = true;
+          this.artboardWidth = parsed.width;
+          this.artboardHeight = parsed.height;
+        }
+      } catch (err) {
+        console.error('Failed to parse canvas-size:', err);
+      }
+    } else if (this.config.canvasSize) {
+      this.artboardEnabled = true;
+      this.artboardWidth = this.config.canvasSize.width;
+      this.artboardHeight = this.config.canvasSize.height;
+    }
 
     // 解析热区数据
     this.parseHotzoneData();
@@ -1344,6 +1387,15 @@ export class CanvasDrawingEditor extends HTMLElement {
     this.initCanvas(false);
   }
 
+  // 居中画板
+  private centerArtboard(): void {
+    if (!this.artboardEnabled || !this.canvas) return;
+    this.panOffset = {
+      x: (this.canvas.width - this.artboardWidth * this.scale) / 2,
+      y: (this.canvas.height - this.artboardHeight * this.scale) / 2,
+    };
+  }
+
   // 初始化画布
   private initCanvas(loadInitial: boolean = false): void {
     if (!this.canvasContainer || !this.canvas) return;
@@ -1356,6 +1408,11 @@ export class CanvasDrawingEditor extends HTMLElement {
       // 首次初始化时加载初始数据（确保画布尺寸已设置）
       if (loadInitial) {
         this.loadInitialData();
+      }
+
+      // 画板模式居中
+      if (this.artboardEnabled) {
+        this.centerArtboard();
       }
 
       this.renderCanvas();
@@ -2590,7 +2647,11 @@ export class CanvasDrawingEditor extends HTMLElement {
   // 重置缩放
   private resetZoom(): void {
     this.scale = 1;
-    this.panOffset = { x: 0, y: 0 };
+    if (this.artboardEnabled) {
+      this.centerArtboard();
+    } else {
+      this.panOffset = { x: 0, y: 0 };
+    }
     this.renderCanvas();
     this.updateZoomDisplay();
   }
@@ -3867,10 +3928,29 @@ export class CanvasDrawingEditor extends HTMLElement {
   public exportPNG(filename: string = 'canvas-export.png'): void {
     if (!this.canvas) return;
 
-    const link = document.createElement('a');
-    link.download = filename;
-    link.href = this.canvas.toDataURL('image/png');
-    link.click();
+    if (this.artboardEnabled) {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = this.artboardWidth;
+      tempCanvas.height = this.artboardHeight;
+      const tempCtx = tempCanvas.getContext('2d')!;
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.save();
+      tempCtx.beginPath();
+      tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
+      tempCtx.clip();
+      this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+      tempCtx.restore();
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = tempCanvas.toDataURL('image/png');
+      link.click();
+    } else {
+      const link = document.createElement('a');
+      link.download = filename;
+      link.href = this.canvas.toDataURL('image/png');
+      link.click();
+    }
   }
 
   // 获取画布图片数据（返回 base64 或 Blob）
@@ -3895,20 +3975,30 @@ export class CanvasDrawingEditor extends HTMLElement {
 
       // 创建临时画布
       const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = this.canvas.width;
-      tempCanvas.height = this.canvas.height;
       const tempCtx = tempCanvas.getContext('2d')!;
 
-      // 绘制背景
-      tempCtx.fillStyle = background;
-      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-
-      // 应用缩放和平移
-      tempCtx.translate(this.panOffset.x, this.panOffset.y);
-      tempCtx.scale(this.scale, this.scale);
-
-      // 绘制所有对象
-      this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+      if (this.artboardEnabled) {
+        // 画板模式：按画板尺寸导出，裁剪到画板区域
+        tempCanvas.width = this.artboardWidth;
+        tempCanvas.height = this.artboardHeight;
+        tempCtx.fillStyle = background;
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.save();
+        tempCtx.beginPath();
+        tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
+        tempCtx.clip();
+        this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+        tempCtx.restore();
+      } else {
+        // 原有行为：按视口尺寸导出
+        tempCanvas.width = this.canvas.width;
+        tempCanvas.height = this.canvas.height;
+        tempCtx.fillStyle = background;
+        tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        tempCtx.translate(this.panOffset.x, this.panOffset.y);
+        tempCtx.scale(this.scale, this.scale);
+        this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+      }
 
       const mimeType = `image/${format}`;
 
@@ -4809,14 +4899,23 @@ export class CanvasDrawingEditor extends HTMLElement {
     // 清空画布
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // 绘制背景
-    this.ctx.fillStyle = '#ffffff';
+    // 绘制背景（画板模式用灰色，否则白色）
+    this.ctx.fillStyle = this.artboardEnabled ? '#f1f5f9' : '#ffffff';
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     // 应用缩放和平移
     this.ctx.save();
     this.ctx.translate(this.panOffset.x, this.panOffset.y);
     this.ctx.scale(this.scale, this.scale);
+
+    // 画板模式：绘制白色画板区域和边框
+    if (this.artboardEnabled) {
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillRect(0, 0, this.artboardWidth, this.artboardHeight);
+      this.ctx.strokeStyle = '#cbd5e1';
+      this.ctx.lineWidth = 1 / this.scale;
+      this.ctx.strokeRect(0, 0, this.artboardWidth, this.artboardHeight);
+    }
 
     // 绘制所有对象
     this.objects.forEach(obj => this.drawObject(this.ctx, obj));
@@ -5615,20 +5714,38 @@ export class CanvasDrawingEditor extends HTMLElement {
       const img = new Image();
       img.onload = () => {
         this.saveHistory();
-        const maxSize = 300;
-        let width = img.width;
-        let height = img.height;
-        if (width > maxSize || height > maxSize) {
-          const ratio = Math.min(maxSize / width, maxSize / height);
-          width *= ratio;
-          height *= ratio;
+
+        // 检查是否勾选了填充画布
+        const fillCheckbox = this.shadow.querySelector('.fill-artboard-checkbox') as HTMLInputElement;
+        const shouldFill = this.artboardEnabled && fillCheckbox?.checked;
+
+        let width: number, height: number, x: number, y: number;
+
+        if (shouldFill) {
+          // 填充画板模式：图片尺寸等于画板尺寸
+          width = this.artboardWidth;
+          height = this.artboardHeight;
+          x = 0;
+          y = 0;
+        } else {
+          // 原有逻辑：缩放到最大 300px
+          const maxSize = 300;
+          width = img.width;
+          height = img.height;
+          if (width > maxSize || height > maxSize) {
+            const ratio = Math.min(maxSize / width, maxSize / height);
+            width *= ratio;
+            height *= ratio;
+          }
+          x = this.artboardEnabled ? (this.artboardWidth - width) / 2 : 100;
+          y = this.artboardEnabled ? (this.artboardHeight - height) / 2 : 100;
         }
 
         const newObj: ImageObject = {
           id: this.generateId(),
           type: 'IMAGE',
-          x: 100,
-          y: 100,
+          x,
+          y,
           width,
           height,
           color: '#000000',
@@ -5873,20 +5990,30 @@ export class CanvasDrawingEditor extends HTMLElement {
   private exportPng(): void {
     // 创建临时画布
     const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = this.canvas.width;
-    tempCanvas.height = this.canvas.height;
     const tempCtx = tempCanvas.getContext('2d')!;
 
-    // 绘制白色背景
-    tempCtx.fillStyle = '#ffffff';
-    tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
-
-    // 应用缩放和平移
-    tempCtx.translate(this.panOffset.x, this.panOffset.y);
-    tempCtx.scale(this.scale, this.scale);
-
-    // 绘制所有对象
-    this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+    if (this.artboardEnabled) {
+      // 画板模式：按画板尺寸导出，裁剪到画板区域
+      tempCanvas.width = this.artboardWidth;
+      tempCanvas.height = this.artboardHeight;
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.save();
+      tempCtx.beginPath();
+      tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
+      tempCtx.clip();
+      this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+      tempCtx.restore();
+    } else {
+      // 原有行为：按视口尺寸导出
+      tempCanvas.width = this.canvas.width;
+      tempCanvas.height = this.canvas.height;
+      tempCtx.fillStyle = '#ffffff';
+      tempCtx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.translate(this.panOffset.x, this.panOffset.y);
+      tempCtx.scale(this.scale, this.scale);
+      this.objects.forEach(obj => this.drawObject(tempCtx, obj));
+    }
 
     // 下载
     const url = tempCanvas.toDataURL('image/png');
@@ -6093,6 +6220,210 @@ export class CanvasDrawingEditor extends HTMLElement {
   // 隐藏右键菜单
   private hideContextMenu(): void {
     this.contextMenu.style.display = 'none';
+  }
+
+  // 处理图片右键菜单
+  private handleImageContextMenu(e: MouseEvent): void {
+    e.preventDefault();
+    const { x, y } = this.getMousePos(e);
+    const clickedObject = [...this.objects].reverse().find(obj => this.isHit(obj, x, y));
+
+    if (clickedObject && clickedObject.type === 'IMAGE') {
+      this.contextMenuEditingImageId = clickedObject.id;
+      // 只显示图片相关菜单项
+      this.contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
+        const action = (item as HTMLElement).getAttribute('data-action');
+        (item as HTMLElement).style.display = action?.startsWith('image-') ? 'block' : 'none';
+      });
+      this.contextMenu.style.display = 'block';
+      this.contextMenu.style.left = `${e.offsetX}px`;
+      this.contextMenu.style.top = `${e.offsetY}px`;
+    } else {
+      this.hideContextMenu();
+    }
+  }
+
+  // 绑定图片右键菜单事件
+  private bindImageContextMenuEvents(): void {
+    // 编辑图片尺寸
+    const editSizeItem = this.contextMenu.querySelector('[data-action="image-edit-size"]');
+    if (editSizeItem) {
+      editSizeItem.addEventListener('click', () => {
+        if (this.contextMenuEditingImageId) {
+          const imgObj = this.objects.find(o => o.id === this.contextMenuEditingImageId) as ImageObject | undefined;
+          if (imgObj) {
+            this.showImageSizeDialog(imgObj);
+          }
+        }
+        this.hideContextMenu();
+      });
+    }
+  }
+
+  // 显示图片尺寸编辑对话框
+  private showImageSizeDialog(imageObj: ImageObject): void {
+    // 移除已存在的对话框
+    const existing = this.shadow.querySelector('.image-size-dialog');
+    if (existing) existing.remove();
+
+    const dialog = document.createElement('div');
+    dialog.className = 'image-size-dialog';
+    dialog.innerHTML = `
+      <div class="image-size-dialog-title">${this.t('editSize')}</div>
+      <div class="image-size-dialog-row">
+        <label>${this.t('imageWidth')}</label>
+        <input type="number" class="image-size-w" value="${Math.round(imageObj.width)}" min="1" />
+      </div>
+      <div class="image-size-dialog-row">
+        <label>${this.t('imageHeight')}</label>
+        <input type="number" class="image-size-h" value="${Math.round(imageObj.height)}" min="1" />
+      </div>
+      <div class="image-size-dialog-actions">
+        <button class="image-size-cancel">${this.t('cancel')}</button>
+        <button class="image-size-confirm">${this.t('confirm')}</button>
+      </div>
+    `;
+
+    this.shadow.querySelector('.canvas-container')!.appendChild(dialog);
+
+    const wInput = dialog.querySelector('.image-size-w') as HTMLInputElement;
+    const hInput = dialog.querySelector('.image-size-h') as HTMLInputElement;
+    const confirmBtn = dialog.querySelector('.image-size-confirm')!;
+    const cancelBtn = dialog.querySelector('.image-size-cancel')!;
+
+    // 保持宽高比
+    const ratio = imageObj.width / imageObj.height;
+    wInput.addEventListener('input', () => {
+      hInput.value = String(Math.round(parseInt(wInput.value) / ratio));
+    });
+    hInput.addEventListener('input', () => {
+      wInput.value = String(Math.round(parseInt(hInput.value) * ratio));
+    });
+
+    const close = () => { dialog.remove(); };
+
+    confirmBtn.addEventListener('click', () => {
+      const newW = parseInt(wInput.value);
+      const newH = parseInt(hInput.value);
+      if (newW > 0 && newH > 0) {
+        this.saveHistory();
+        imageObj.width = newW;
+        imageObj.height = newH;
+        this.renderCanvas();
+        this.dispatchChangeEvent();
+      }
+      close();
+    });
+
+    cancelBtn.addEventListener('click', close);
+
+    // 点击外部关闭
+    const onDown = (ev: Event) => {
+      if (!dialog.contains(ev.target as Node)) {
+        close();
+        this.shadow.removeEventListener('mousedown', onDown);
+      }
+    };
+    setTimeout(() => this.shadow.addEventListener('mousedown', onDown), 0);
+  }
+
+  // 绑定画布尺寸控制事件
+  private bindCanvasSizeEvents(): void {
+    const sizeBtn = this.shadow.querySelector('.canvas-size-btn');
+    const sizeDropdown = this.shadow.querySelector('.canvas-size-dropdown') as HTMLElement;
+    if (!sizeBtn || !sizeDropdown) return;
+
+    // 切换下拉菜单
+    sizeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isVisible = sizeDropdown.style.display !== 'none';
+      sizeDropdown.style.display = isVisible ? 'none' : 'block';
+    });
+
+    // 点击外部关闭
+    this.shadow.addEventListener('mousedown', (e) => {
+      if (!sizeDropdown.contains(e.target as Node) && !sizeBtn.contains(e.target as Node)) {
+        sizeDropdown.style.display = 'none';
+      }
+    });
+
+    // 预设按钮
+    sizeDropdown.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const w = parseInt((btn as HTMLElement).dataset.w || '800');
+        const h = parseInt((btn as HTMLElement).dataset.h || '600');
+        this.applyCanvasSize(w, h);
+        sizeDropdown.style.display = 'none';
+      });
+    });
+
+    // 自定义尺寸应用
+    const applyBtn = sizeDropdown.querySelector('.canvas-size-apply');
+    if (applyBtn) {
+      applyBtn.addEventListener('click', () => {
+        const wInput = sizeDropdown.querySelector('.canvas-size-w') as HTMLInputElement;
+        const hInput = sizeDropdown.querySelector('.canvas-size-h') as HTMLInputElement;
+        const w = parseInt(wInput.value);
+        const h = parseInt(hInput.value);
+        if (w > 0 && h > 0) {
+          this.applyCanvasSize(w, h);
+          sizeDropdown.style.display = 'none';
+        }
+      });
+    }
+
+    // 禁用画板模式
+    const offBtn = sizeDropdown.querySelector('.canvas-size-off-btn');
+    if (offBtn) {
+      offBtn.addEventListener('click', () => {
+        this.artboardEnabled = false;
+        this.panOffset = { x: 0, y: 0 };
+        this.renderCanvas();
+        // 更新按钮标签
+        const label = sizeBtn.querySelector('.canvas-size-label');
+        if (label) label.textContent = this.t('canvasSize');
+        sizeDropdown.style.display = 'none';
+        // 重新渲染UI以移除禁用按钮
+        const currentObjects = [...this.objects];
+        const currentScale = this.scale;
+        const currentPanOffset = { ...this.panOffset };
+        const currentSelectedIds = new Set(this.selectedIds);
+        this.render();
+        this.setupEventListeners();
+        this.initCanvas(false);
+        this.objects = currentObjects;
+        this.scale = currentScale;
+        this.panOffset = currentPanOffset;
+        this.selectedIds = currentSelectedIds;
+        this.objects.forEach(obj => {
+          if (obj.type === 'IMAGE' && (obj as ImageObject).dataUrl) {
+            const img = new Image();
+            img.onload = () => { (obj as ImageObject).imageElement = img; this.renderCanvas(); };
+            img.src = (obj as ImageObject).dataUrl;
+          }
+        });
+        this.updateZoomDisplay();
+        this.renderCanvas();
+      });
+    }
+  }
+
+  // 应用画布尺寸
+  private applyCanvasSize(width: number, height: number): void {
+    this.artboardEnabled = true;
+    this.artboardWidth = width;
+    this.artboardHeight = height;
+    this.centerArtboard();
+    this.renderCanvas();
+    // 更新按钮标签
+    const label = this.shadow.querySelector('.canvas-size-label');
+    if (label) label.textContent = `${width}×${height}`;
+    // 触发自定义事件
+    this.dispatchEvent(new CustomEvent('canvas-size-change', {
+      detail: { width, height },
+      bubbles: true,
+      composed: true
+    }));
   }
 
   // 处理热区操作
@@ -6385,6 +6716,12 @@ export class CanvasDrawingEditor extends HTMLElement {
                     <span class="dropdown-label">${this.t('insertImage')}</span>
                     <input type="file" accept="image/*" class="hidden image-input" />
                   </label>
+                  ${this.artboardEnabled ? `
+                    <label class="fill-artboard-option">
+                      <input type="checkbox" class="fill-artboard-checkbox" />
+                      <span class="dropdown-label">${this.t('fillArtboard')}</span>
+                    </label>
+                  ` : ''}
                 ` : ''}
                 ${tool.layers ? `
                   <button class="tool-btn dropdown-item layers-btn" title="${this.t('layers')}">
@@ -6586,6 +6923,41 @@ export class CanvasDrawingEditor extends HTMLElement {
                   </button>
                 </div>
               ` : ''}
+              ${(tool.canvasSize !== false) ? `
+                <div class="canvas-size-controls">
+                  <button class="tool-btn canvas-size-btn" title="${this.t('canvasSize')}">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2"/>
+                      <path d="M3 9h18M9 3v18"/>
+                    </svg>
+                    <span class="canvas-size-label">${this.artboardEnabled ? `${this.artboardWidth}×${this.artboardHeight}` : this.t('canvasSize')}</span>
+                    <span class="dropdown-indicator">▾</span>
+                  </button>
+                  <div class="canvas-size-dropdown" style="display: none;">
+                    <div class="canvas-size-presets">
+                      <button class="preset-btn" data-w="800" data-h="600">800×600</button>
+                      <button class="preset-btn" data-w="1024" data-h="768">1024×768</button>
+                      <button class="preset-btn" data-w="1920" data-h="1080">16:9 (1920×1080)</button>
+                      <button class="preset-btn" data-w="1280" data-h="720">16:9 (1280×720)</button>
+                      <button class="preset-btn" data-w="1080" data-h="1920">9:16 (1080×1920)</button>
+                      <button class="preset-btn" data-w="1024" data-h="1024">1:1 (1024×1024)</button>
+                      <button class="preset-btn" data-w="794" data-h="1123">A4 (794×1123)</button>
+                      <button class="preset-btn" data-w="1123" data-h="794">A4 Landscape</button>
+                    </div>
+                    <div class="canvas-size-custom">
+                      <input type="number" class="canvas-size-input canvas-size-w" placeholder="W" min="1" value="${this.artboardWidth}" />
+                      <span class="canvas-size-x">×</span>
+                      <input type="number" class="canvas-size-input canvas-size-h" placeholder="H" min="1" value="${this.artboardHeight}" />
+                      <button class="canvas-size-apply">${this.t('confirm')}</button>
+                    </div>
+                    ${this.artboardEnabled ? `
+                      <div class="canvas-size-disable">
+                        <button class="canvas-size-off-btn">${this.t('disableArtboard')}</button>
+                      </div>
+                    ` : ''}
+                  </div>
+                </div>
+              ` : ''}
               ${(tool.exportJson || tool.importJson || tool.download || tool.clear) ? `
                 <div class="file-controls">
                   ${tool.exportJson ? `
@@ -6707,6 +7079,7 @@ export class CanvasDrawingEditor extends HTMLElement {
               <div class="context-menu-item" data-action="hotzone-create">${this.t('hotzoneCreate')}</div>
               <div class="context-menu-item" data-action="hotzone-edit" style="display: none;">${this.t('hotzoneEdit')}</div>
               <div class="context-menu-item context-menu-item-danger" data-action="hotzone-remove" style="display: none;">${this.t('hotzoneRemove')}</div>
+              <div class="context-menu-item" data-action="image-edit-size" style="display: none;">${this.t('editSize')}</div>
             </div>
           </div>
 
@@ -6800,14 +7173,19 @@ export class CanvasDrawingEditor extends HTMLElement {
         e.preventDefault();
         return;
       }
-      // 仅在启用热区时处理右键菜单
+      // 热区右键菜单（TEXT对象）
       if (this.config.enableHotzone) {
         this.handleContextMenu(e);
+        return;
       }
+      // 图片右键菜单（IMAGE对象）
+      this.handleImageContextMenu(e);
     });
     if (this.config.enableHotzone) {
       this.bindHotzoneEvents();
     }
+    this.bindImageContextMenuEvents();
+    this.bindCanvasSizeEvents();
 
     // 工具按钮
     this.shadow.querySelectorAll('.tool-btn[data-tool]').forEach(btn => {
@@ -7458,8 +7836,12 @@ export class CanvasDrawingEditor extends HTMLElement {
   // 添加形状到画布
   private addShapeToCanvas(shape: ShapeConfig): void {
     // 计算画布中心位置
-    const centerX = (this.canvas.width / 2 - this.panOffset.x) / this.scale;
-    const centerY = (this.canvas.height / 2 - this.panOffset.y) / this.scale;
+    const centerX = this.artboardEnabled
+      ? this.artboardWidth / 2
+      : (this.canvas.width / 2 - this.panOffset.x) / this.scale;
+    const centerY = this.artboardEnabled
+      ? this.artboardHeight / 2
+      : (this.canvas.height / 2 - this.panOffset.y) / this.scale;
 
     const width = shape.width || 100;
     const height = shape.height || 100;
@@ -8733,6 +9115,221 @@ export class CanvasDrawingEditor extends HTMLElement {
 
       .context-menu-item-danger:hover {
         background: #fef2f2;
+      }
+
+      /* 画布尺寸控制 */
+      .canvas-size-controls {
+        position: relative;
+      }
+
+      .canvas-size-btn {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+      }
+
+      .canvas-size-label {
+        max-width: 100px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .canvas-size-dropdown {
+        position: absolute;
+        top: 100%;
+        right: 0;
+        margin-top: 4px;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        padding: 12px;
+        z-index: 200;
+        min-width: 260px;
+      }
+
+      .canvas-size-presets {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      .preset-btn {
+        padding: 6px 8px;
+        font-size: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #334155;
+        cursor: pointer;
+        transition: all 0.15s;
+        white-space: nowrap;
+      }
+
+      .preset-btn:hover {
+        background: #e0e7ff;
+        border-color: #a5b4fc;
+        color: #4338ca;
+      }
+
+      .canvas-size-custom {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding-top: 8px;
+        border-top: 1px solid #f1f5f9;
+      }
+
+      .canvas-size-input {
+        width: 70px;
+        padding: 5px 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 13px;
+        text-align: center;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      .canvas-size-input:focus {
+        border-color: ${this.config.themeColor || DEFAULT_THEME_COLOR};
+      }
+
+      .canvas-size-x {
+        color: #94a3b8;
+        font-size: 12px;
+      }
+
+      .canvas-size-apply {
+        padding: 5px 12px;
+        font-size: 12px;
+        border: none;
+        border-radius: 6px;
+        background: ${this.config.themeColor || DEFAULT_THEME_COLOR};
+        color: #ffffff;
+        cursor: pointer;
+        transition: opacity 0.15s;
+        white-space: nowrap;
+      }
+
+      .canvas-size-apply:hover {
+        opacity: 0.9;
+      }
+
+      .canvas-size-disable {
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #f1f5f9;
+      }
+
+      .canvas-size-off-btn {
+        width: 100%;
+        padding: 6px;
+        font-size: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #fef2f2;
+        color: #ef4444;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+
+      .canvas-size-off-btn:hover {
+        background: #fee2e2;
+        border-color: #fca5a5;
+      }
+
+      /* 填充画布选项 */
+      .fill-artboard-option {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        font-size: 12px;
+        color: #64748b;
+        cursor: pointer;
+      }
+
+      .fill-artboard-option input[type="checkbox"] {
+        accent-color: ${this.config.themeColor || DEFAULT_THEME_COLOR};
+      }
+
+      /* 图片尺寸编辑对话框 */
+      .image-size-dialog {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: #ffffff;
+        border-radius: 12px;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+        padding: 20px;
+        z-index: 300;
+        min-width: 240px;
+      }
+
+      .image-size-dialog-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: #1e293b;
+        margin-bottom: 16px;
+      }
+
+      .image-size-dialog-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .image-size-dialog-row label {
+        font-size: 13px;
+        color: #64748b;
+        min-width: 40px;
+      }
+
+      .image-size-dialog-row input {
+        flex: 1;
+        padding: 6px 10px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 14px;
+        outline: none;
+        transition: border-color 0.15s;
+      }
+
+      .image-size-dialog-row input:focus {
+        border-color: ${this.config.themeColor || DEFAULT_THEME_COLOR};
+      }
+
+      .image-size-dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+      }
+
+      .image-size-cancel {
+        padding: 6px 16px;
+        font-size: 13px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #f8fafc;
+        color: #64748b;
+        cursor: pointer;
+      }
+
+      .image-size-confirm {
+        padding: 6px 16px;
+        font-size: 13px;
+        border: none;
+        border-radius: 6px;
+        background: ${this.config.themeColor || DEFAULT_THEME_COLOR};
+        color: #ffffff;
+        cursor: pointer;
       }
 
       /* 图层面板 */
