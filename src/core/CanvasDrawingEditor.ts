@@ -924,6 +924,14 @@ export class CanvasDrawingEditor extends HTMLElement {
   private artboardHeight: number = 600;
   private contextMenuEditingImageId: string | null = null;
 
+  // 画板边缘拖拽调整大小状态
+  private isResizingArtboard: boolean = false;
+  private artboardResizeEdge: 'n' | 's' | 'e' | 'w' | null = null;
+  private artboardResizeStartPos: Point = { x: 0, y: 0 };
+  private artboardResizeStartWidth: number = 0;
+  private artboardResizeStartHeight: number = 0;
+  private hoveredArtboardEdge: 'n' | 's' | 'e' | 'w' | null = null;
+
   // 绑定的事件处理器（用于移除监听）
   private boundHandleResize: () => void;
   private boundHandleKeyDown: (e: KeyboardEvent) => void;
@@ -1653,6 +1661,34 @@ export class CanvasDrawingEditor extends HTMLElement {
         return handle.name;
       }
     }
+    return null;
+  }
+
+  // 获取画板边缘手柄（上/下/左/右）
+  private getArtboardEdgeAtPoint(x: number, y: number): 'n' | 's' | 'e' | 'w' | null {
+    if (!this.artboardEnabled) return null;
+
+    const handleZone = 6; // 边缘检测区域半径（canvas 逻辑坐标）
+    const w = this.artboardWidth;
+    const h = this.artboardHeight;
+
+    // 上边
+    if (y >= -handleZone && y <= handleZone && x >= -handleZone && x <= w + handleZone) {
+      return 'n';
+    }
+    // 下边
+    if (y >= h - handleZone && y <= h + handleZone && x >= -handleZone && x <= w + handleZone) {
+      return 's';
+    }
+    // 左边
+    if (x >= -handleZone && x <= handleZone && y >= -handleZone && y <= h + handleZone) {
+      return 'w';
+    }
+    // 右边
+    if (x >= w - handleZone && x <= w + handleZone && y >= -handleZone && y <= h + handleZone) {
+      return 'e';
+    }
+
     return null;
   }
 
@@ -2895,6 +2931,20 @@ export class CanvasDrawingEditor extends HTMLElement {
       return;
     }
 
+    // 检查是否点击画板边缘手柄
+    if (this.artboardEnabled) {
+      const artboardEdge = this.getArtboardEdgeAtPoint(x, y);
+      if (artboardEdge) {
+        this.saveHistory();
+        this.isResizingArtboard = true;
+        this.artboardResizeEdge = artboardEdge;
+        this.artboardResizeStartPos = { x, y };
+        this.artboardResizeStartWidth = this.artboardWidth;
+        this.artboardResizeStartHeight = this.artboardHeight;
+        return;
+      }
+    }
+
     if (this.tool === 'SELECT') {
       // Ctrl 和 Shift 都支持多选
       const isMultiSelect = (e as MouseEvent).shiftKey || (e as MouseEvent).ctrlKey || (e as MouseEvent).metaKey;
@@ -3377,7 +3427,59 @@ export class CanvasDrawingEditor extends HTMLElement {
       return;
     }
 
+    // 处理画板边缘拖拽调整大小
+    if (this.isResizingArtboard && this.artboardResizeEdge) {
+      const { x, y } = this.getMousePos(e);
+      const dx = x - this.artboardResizeStartPos.x;
+      const dy = y - this.artboardResizeStartPos.y;
+      const minSize = 100;
+
+      switch (this.artboardResizeEdge) {
+        case 'n': {
+          const newHeight = Math.max(minSize, this.artboardResizeStartHeight - dy);
+          const actualDelta = this.artboardResizeStartHeight - newHeight;
+          this.artboardHeight = newHeight;
+          this.panOffset.y += actualDelta * this.scale;
+          break;
+        }
+        case 's': {
+          this.artboardHeight = Math.max(minSize, this.artboardResizeStartHeight + dy);
+          break;
+        }
+        case 'w': {
+          const newWidth = Math.max(minSize, this.artboardResizeStartWidth - dx);
+          const actualDelta = this.artboardResizeStartWidth - newWidth;
+          this.artboardWidth = newWidth;
+          this.panOffset.x += actualDelta * this.scale;
+          break;
+        }
+        case 'e': {
+          this.artboardWidth = Math.max(minSize, this.artboardResizeStartWidth + dx);
+          break;
+        }
+      }
+      this.renderCanvas();
+      return;
+    }
+
     const { x, y } = this.getMousePos(e);
+
+    // 更新画板边缘手柄悬停状态
+    if (this.artboardEnabled && !this.isDragging) {
+      const edge = this.getArtboardEdgeAtPoint(x, y);
+      if (edge !== this.hoveredArtboardEdge) {
+        this.hoveredArtboardEdge = edge;
+        if (edge === 'n' || edge === 's') {
+          this.canvas.style.cursor = 'ns-resize';
+        } else if (edge === 'e' || edge === 'w') {
+          this.canvas.style.cursor = 'ew-resize';
+        } else {
+          this.canvas.style.cursor = this.tool === 'SELECT' ? 'default' : 'crosshair';
+        }
+        this.renderCanvas();
+      }
+      if (edge) return; // 悬停在手柄上时，不处理其他交互
+    }
 
     // 处理贝塞尔曲线拖拽
     if (this.tool === 'BEZIER' && this.bezierDraggingPoint >= 0) {
@@ -3795,8 +3897,10 @@ export class CanvasDrawingEditor extends HTMLElement {
     }
 
     // 检测是否有数据变化（拖动、调整大小、旋转、斜切等操作）
+    const hasArtboardResized = this.isResizingArtboard;
     const hasDataChanged = this.isResizing || this.isRotating || this.isSkewing ||
                            this.isMultiDragging || this.isMultiRotating ||
+                           this.isResizingArtboard ||
                            (this.isDragging && this.selectedId && this.dragStart);
 
     this.isDragging = false;
@@ -3813,6 +3917,8 @@ export class CanvasDrawingEditor extends HTMLElement {
     this.isDraggingOrigin = false;
     this.isMultiRotating = false;
     this.multiRotateObjectsStart.clear();
+    this.isResizingArtboard = false;
+    this.artboardResizeEdge = null;
 
     // 恢复光标
     if (this.isSpacePressed) {
@@ -3828,6 +3934,17 @@ export class CanvasDrawingEditor extends HTMLElement {
     } else if (hasDataChanged) {
       // 拖动、调整大小、旋转等操作完成后触发变化事件
       this.dispatchChangeEvent();
+    }
+
+    // 画板尺寸变化后触发事件并更新标签
+    if (hasArtboardResized) {
+      const label = this.shadow.querySelector('.canvas-size-label');
+      if (label) label.textContent = `${this.artboardWidth}×${this.artboardHeight}`;
+      this.dispatchEvent(new CustomEvent('canvas-size-change', {
+        detail: { width: this.artboardWidth, height: this.artboardHeight },
+        bubbles: true,
+        composed: true
+      }));
     }
 
     this.renderCanvas();
@@ -4915,6 +5032,9 @@ export class CanvasDrawingEditor extends HTMLElement {
       this.ctx.strokeStyle = '#cbd5e1';
       this.ctx.lineWidth = 1 / this.scale;
       this.ctx.strokeRect(0, 0, this.artboardWidth, this.artboardHeight);
+
+      // 绘制画板边缘调整手柄
+      this.drawArtboardResizeHandles();
     }
 
     // 绘制所有对象
@@ -5623,6 +5743,40 @@ export class CanvasDrawingEditor extends HTMLElement {
       });
     }
 
+    ctx.restore();
+  }
+
+  // 绘制画板边缘调整手柄
+  private drawArtboardResizeHandles(): void {
+    const ctx = this.ctx;
+    const w = this.artboardWidth;
+    const h = this.artboardHeight;
+    const handleSize = 8;
+    const hovered = this.hoveredArtboardEdge;
+    const resizing = this.artboardResizeEdge;
+
+    const edges: Array<{ edge: 'n' | 's' | 'e' | 'w'; x: number; y: number }> = [
+      { edge: 'n', x: w / 2, y: 0 },
+      { edge: 's', x: w / 2, y: h },
+      { edge: 'w', x: 0, y: h / 2 },
+      { edge: 'e', x: w, y: h / 2 },
+    ];
+
+    ctx.save();
+    ctx.shadowBlur = 0;
+    edges.forEach(({ edge, x, y }) => {
+      const isActive = hovered === edge || resizing === edge;
+      const size = isActive ? handleSize + 2 : handleSize;
+
+      ctx.fillStyle = isActive ? '#2563eb' : '#3b82f6';
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 2 / this.scale;
+
+      ctx.beginPath();
+      ctx.rect(x - size / 2, y - size / 2, size, size);
+      ctx.fill();
+      ctx.stroke();
+    });
     ctx.restore();
   }
 
@@ -9127,10 +9281,21 @@ export class CanvasDrawingEditor extends HTMLElement {
         align-items: center;
         gap: 4px;
         font-size: 12px;
+        background: #f1f5f9;
+        border-radius: 6px;
+        padding: 4px 8px;
+        color: #475569;
+        width: 100px;
+        height: 40px
+      }
+
+      .canvas-size-btn:hover {
+        background: var(--theme-hover-bg);
+        color: var(--theme-color);
       }
 
       .canvas-size-label {
-        max-width: 100px;
+        max-width: 150px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
