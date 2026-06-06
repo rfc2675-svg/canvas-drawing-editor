@@ -1698,6 +1698,13 @@ export class CanvasDrawingEditor extends HTMLElement {
     return null;
   }
 
+  // 判断逻辑坐标点是否在画板外部（灰色区域）
+  private isPointOutsideArtboard(x: number, y: number): boolean {
+    const ox = this.artboardOffsetX;
+    const oy = this.artboardOffsetY;
+    return x < ox || x > ox + this.artboardWidth || y < oy || y > oy + this.artboardHeight;
+  }
+
   // 获取旋转手柄位置（考虑对象旋转和斜切后的屏幕坐标）
   private getRotateHandlePosition(obj: CanvasObject): Point {
     const bounds = this.getObjectBounds(obj);
@@ -3092,6 +3099,11 @@ export class CanvasDrawingEditor extends HTMLElement {
           this.isPanning = true;
           this.panStart = screenPos;
           this.canvas.style.cursor = 'grabbing';
+        } else if (this.artboardEnabled && this.isPointOutsideArtboard(x, y)) {
+          // 画板模式下，点击画板外部灰色区域：平移视口
+          this.isPanning = true;
+          this.panStart = screenPos;
+          this.canvas.style.cursor = 'grabbing';
         } else {
           // 开始框选
           this.isSelecting = true;
@@ -3487,6 +3499,15 @@ export class CanvasDrawingEditor extends HTMLElement {
         this.renderCanvas();
       }
       if (edge) return; // 悬停在手柄上时，不处理其他交互
+    }
+
+    // 画板模式下，悬停在灰色区域时显示 grab 光标提示
+    if (this.artboardEnabled && !this.isDragging && this.tool === 'SELECT') {
+      if (this.isPointOutsideArtboard(x, y)) {
+        this.canvas.style.cursor = 'grab';
+      } else if (this.canvas.style.cursor === 'grab' && !this.isSpacePressed) {
+        this.canvas.style.cursor = 'default';
+      }
     }
 
     // 处理贝塞尔曲线拖拽
@@ -6218,6 +6239,16 @@ export class CanvasDrawingEditor extends HTMLElement {
 
   // 更新 UI
   private updateUI(): void {
+    // 更新顶栏选中状态 class
+    const topBar = this.shadow.querySelector('.top-bar');
+    if (topBar) {
+      if (this.selectedId || this.selectedIds.size > 0) {
+        topBar.classList.add('has-selection');
+      } else {
+        topBar.classList.remove('has-selection');
+      }
+    }
+
     // 更新选中状态显示
     const selectionInfo = this.shadow.querySelector('.selection-info');
     if (selectionInfo) {
@@ -8635,7 +8666,7 @@ export class CanvasDrawingEditor extends HTMLElement {
         justify-content: space-between;
         padding: 8px 16px;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 8px;
       }
 
@@ -8644,6 +8675,11 @@ export class CanvasDrawingEditor extends HTMLElement {
         align-items: center;
         gap: 16px;
         flex-shrink: 0;
+      }
+
+      .top-bar.has-selection .canvas-size-controls,
+      .top-bar.has-selection .file-controls {
+        display: none;
       }
 
       .top-bar-right {
