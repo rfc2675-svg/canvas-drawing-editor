@@ -920,8 +920,8 @@ export class CanvasDrawingEditor extends HTMLElement {
 
   // 画板（Artboard）模式
   private artboardEnabled: boolean = false;
-  private artboardWidth: number = 800;
-  private artboardHeight: number = 600;
+  private artboardWidth: number = 750;
+  private artboardHeight: number = 1334;
   private artboardOffsetX: number = 0;
   private artboardOffsetY: number = 0;
   private contextMenuEditingImageId: string | null = null;
@@ -1187,6 +1187,9 @@ export class CanvasDrawingEditor extends HTMLElement {
       this.artboardEnabled = true;
       this.artboardWidth = this.config.canvasSize.width;
       this.artboardHeight = this.config.canvasSize.height;
+    } else {
+      // 默认启用画板模式（手机竖屏分辨率）
+      this.artboardEnabled = true;
     }
 
     // 解析热区数据
@@ -7147,14 +7150,12 @@ export class CanvasDrawingEditor extends HTMLElement {
                   </button>
                   <div class="canvas-size-dropdown" style="display: none;">
                     <div class="canvas-size-presets">
-                      <button class="preset-btn" data-w="800" data-h="600">800×600</button>
-                      <button class="preset-btn" data-w="1024" data-h="768">1024×768</button>
-                      <button class="preset-btn" data-w="1920" data-h="1080">16:9 (1920×1080)</button>
-                      <button class="preset-btn" data-w="1280" data-h="720">16:9 (1280×720)</button>
-                      <button class="preset-btn" data-w="1080" data-h="1920">9:16 (1080×1920)</button>
-                      <button class="preset-btn" data-w="1024" data-h="1024">1:1 (1024×1024)</button>
-                      <button class="preset-btn" data-w="794" data-h="1123">A4 (794×1123)</button>
-                      <button class="preset-btn" data-w="1123" data-h="794">A4 Landscape</button>
+                      <button class="preset-btn" data-w="750" data-h="1334">750×1334</button>
+                      <button class="preset-btn" data-w="1080" data-h="1920">1080×1920</button>
+                      <button class="preset-btn" data-w="750" data-h="750">750×750</button>
+                      <button class="preset-btn" data-w="1080" data-h="1080">1080×1080</button>
+                      <button class="preset-btn" data-w="1334" data-h="750">1334×750</button>
+                      <button class="preset-btn" data-w="1920" data-h="1080">1920×1080</button>
                     </div>
                     <div class="canvas-size-custom">
                       <input type="number" class="canvas-size-input canvas-size-w" placeholder="W" min="1" value="${this.artboardWidth}" />
