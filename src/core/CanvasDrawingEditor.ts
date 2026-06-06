@@ -922,14 +922,18 @@ export class CanvasDrawingEditor extends HTMLElement {
   private artboardEnabled: boolean = false;
   private artboardWidth: number = 800;
   private artboardHeight: number = 600;
+  private artboardOffsetX: number = 0;
+  private artboardOffsetY: number = 0;
   private contextMenuEditingImageId: string | null = null;
 
   // 画板边缘拖拽调整大小状态
   private isResizingArtboard: boolean = false;
   private artboardResizeEdge: 'n' | 's' | 'e' | 'w' | null = null;
-  private artboardResizeStartPos: Point = { x: 0, y: 0 };
+  private artboardResizeStartScreenPos: Point = { x: 0, y: 0 };
   private artboardResizeStartWidth: number = 0;
   private artboardResizeStartHeight: number = 0;
+  private artboardResizeStartOffsetX: number = 0;
+  private artboardResizeStartOffsetY: number = 0;
   private hoveredArtboardEdge: 'n' | 's' | 'e' | 'w' | null = null;
 
   // 绑定的事件处理器（用于移除监听）
@@ -1399,8 +1403,8 @@ export class CanvasDrawingEditor extends HTMLElement {
   private centerArtboard(): void {
     if (!this.artboardEnabled || !this.canvas) return;
     this.panOffset = {
-      x: (this.canvas.width - this.artboardWidth * this.scale) / 2,
-      y: (this.canvas.height - this.artboardHeight * this.scale) / 2,
+      x: (this.canvas.width - this.artboardWidth * this.scale) / 2 - this.artboardOffsetX * this.scale,
+      y: (this.canvas.height - this.artboardHeight * this.scale) / 2 - this.artboardOffsetY * this.scale,
     };
   }
 
@@ -1668,24 +1672,26 @@ export class CanvasDrawingEditor extends HTMLElement {
   private getArtboardEdgeAtPoint(x: number, y: number): 'n' | 's' | 'e' | 'w' | null {
     if (!this.artboardEnabled) return null;
 
-    const handleZone = 6; // 边缘检测区域半径（canvas 逻辑坐标）
+    const handleZone = 6;
+    const ox = this.artboardOffsetX;
+    const oy = this.artboardOffsetY;
     const w = this.artboardWidth;
     const h = this.artboardHeight;
 
     // 上边
-    if (y >= -handleZone && y <= handleZone && x >= -handleZone && x <= w + handleZone) {
+    if (y >= oy - handleZone && y <= oy + handleZone && x >= ox - handleZone && x <= ox + w + handleZone) {
       return 'n';
     }
     // 下边
-    if (y >= h - handleZone && y <= h + handleZone && x >= -handleZone && x <= w + handleZone) {
+    if (y >= oy + h - handleZone && y <= oy + h + handleZone && x >= ox - handleZone && x <= ox + w + handleZone) {
       return 's';
     }
     // 左边
-    if (x >= -handleZone && x <= handleZone && y >= -handleZone && y <= h + handleZone) {
+    if (x >= ox - handleZone && x <= ox + handleZone && y >= oy - handleZone && y <= oy + h + handleZone) {
       return 'w';
     }
     // 右边
-    if (x >= w - handleZone && x <= w + handleZone && y >= -handleZone && y <= h + handleZone) {
+    if (x >= ox + w - handleZone && x <= ox + w + handleZone && y >= oy - handleZone && y <= oy + h + handleZone) {
       return 'e';
     }
 
@@ -2938,9 +2944,11 @@ export class CanvasDrawingEditor extends HTMLElement {
         this.saveHistory();
         this.isResizingArtboard = true;
         this.artboardResizeEdge = artboardEdge;
-        this.artboardResizeStartPos = { x, y };
+        this.artboardResizeStartScreenPos = this.getScreenPos(e);
         this.artboardResizeStartWidth = this.artboardWidth;
         this.artboardResizeStartHeight = this.artboardHeight;
+        this.artboardResizeStartOffsetX = this.artboardOffsetX;
+        this.artboardResizeStartOffsetY = this.artboardOffsetY;
         return;
       }
     }
@@ -3427,34 +3435,34 @@ export class CanvasDrawingEditor extends HTMLElement {
       return;
     }
 
-    // 处理画板边缘拖拽调整大小
+    // 处理画板边缘拖拽调整大小（使用屏幕坐标，无反馈循环）
     if (this.isResizingArtboard && this.artboardResizeEdge) {
-      const { x, y } = this.getMousePos(e);
-      const dx = x - this.artboardResizeStartPos.x;
-      const dy = y - this.artboardResizeStartPos.y;
+      const screenPos = this.getScreenPos(e);
+      const screenDx = screenPos.x - this.artboardResizeStartScreenPos.x;
+      const screenDy = screenPos.y - this.artboardResizeStartScreenPos.y;
+      const logicalDx = screenDx / this.scale;
+      const logicalDy = screenDy / this.scale;
       const minSize = 100;
 
       switch (this.artboardResizeEdge) {
         case 'n': {
-          const newHeight = Math.max(minSize, this.artboardResizeStartHeight - dy);
-          const actualDelta = this.artboardResizeStartHeight - newHeight;
+          const newHeight = Math.max(minSize, this.artboardResizeStartHeight - logicalDy);
           this.artboardHeight = newHeight;
-          this.panOffset.y += actualDelta * this.scale;
+          this.artboardOffsetY = this.artboardResizeStartOffsetY + (this.artboardResizeStartHeight - newHeight);
           break;
         }
         case 's': {
-          this.artboardHeight = Math.max(minSize, this.artboardResizeStartHeight + dy);
+          this.artboardHeight = Math.max(minSize, this.artboardResizeStartHeight + logicalDy);
           break;
         }
         case 'w': {
-          const newWidth = Math.max(minSize, this.artboardResizeStartWidth - dx);
-          const actualDelta = this.artboardResizeStartWidth - newWidth;
+          const newWidth = Math.max(minSize, this.artboardResizeStartWidth - logicalDx);
           this.artboardWidth = newWidth;
-          this.panOffset.x += actualDelta * this.scale;
+          this.artboardOffsetX = this.artboardResizeStartOffsetX + (this.artboardResizeStartWidth - newWidth);
           break;
         }
         case 'e': {
-          this.artboardWidth = Math.max(minSize, this.artboardResizeStartWidth + dx);
+          this.artboardWidth = Math.max(minSize, this.artboardResizeStartWidth + logicalDx);
           break;
         }
       }
@@ -3936,8 +3944,9 @@ export class CanvasDrawingEditor extends HTMLElement {
       this.dispatchChangeEvent();
     }
 
-    // 画板尺寸变化后触发事件并更新标签
+    // 画板尺寸变化后：重新居中并触发事件
     if (hasArtboardResized) {
+      this.centerArtboard();
       const label = this.shadow.querySelector('.canvas-size-label');
       if (label) label.textContent = `${this.artboardWidth}×${this.artboardHeight}`;
       this.dispatchEvent(new CustomEvent('canvas-size-change', {
@@ -4056,6 +4065,7 @@ export class CanvasDrawingEditor extends HTMLElement {
       tempCtx.beginPath();
       tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
       tempCtx.clip();
+      tempCtx.translate(-this.artboardOffsetX, -this.artboardOffsetY);
       this.objects.forEach(obj => this.drawObject(tempCtx, obj));
       tempCtx.restore();
       const link = document.createElement('a');
@@ -4104,6 +4114,7 @@ export class CanvasDrawingEditor extends HTMLElement {
         tempCtx.beginPath();
         tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
         tempCtx.clip();
+        tempCtx.translate(-this.artboardOffsetX, -this.artboardOffsetY);
         this.objects.forEach(obj => this.drawObject(tempCtx, obj));
         tempCtx.restore();
       } else {
@@ -5027,14 +5038,21 @@ export class CanvasDrawingEditor extends HTMLElement {
 
     // 画板模式：绘制白色画板区域和边框
     if (this.artboardEnabled) {
+      const ox = this.artboardOffsetX;
+      const oy = this.artboardOffsetY;
       this.ctx.fillStyle = '#ffffff';
-      this.ctx.fillRect(0, 0, this.artboardWidth, this.artboardHeight);
+      this.ctx.fillRect(ox, oy, this.artboardWidth, this.artboardHeight);
       this.ctx.strokeStyle = '#cbd5e1';
       this.ctx.lineWidth = 1 / this.scale;
-      this.ctx.strokeRect(0, 0, this.artboardWidth, this.artboardHeight);
+      this.ctx.strokeRect(ox, oy, this.artboardWidth, this.artboardHeight);
+    }
 
-      // 绘制画板边缘调整手柄
-      this.drawArtboardResizeHandles();
+    // 画板模式：裁剪内容到画板范围内
+    if (this.artboardEnabled) {
+      this.ctx.save();
+      this.ctx.beginPath();
+      this.ctx.rect(this.artboardOffsetX, this.artboardOffsetY, this.artboardWidth, this.artboardHeight);
+      this.ctx.clip();
     }
 
     // 绘制所有对象
@@ -5142,6 +5160,12 @@ export class CanvasDrawingEditor extends HTMLElement {
       this.ctx.strokeRect(this.selectionRect.x, this.selectionRect.y, this.selectionRect.width, this.selectionRect.height);
       this.ctx.fillRect(this.selectionRect.x, this.selectionRect.y, this.selectionRect.width, this.selectionRect.height);
       this.ctx.setLineDash([]);
+    }
+
+    // 画板模式：移除裁剪，绘制边缘手柄（不被裁剪）
+    if (this.artboardEnabled) {
+      this.ctx.restore(); // 移除 clip
+      this.drawArtboardResizeHandles();
     }
 
     this.ctx.restore();
@@ -5749,6 +5773,8 @@ export class CanvasDrawingEditor extends HTMLElement {
   // 绘制画板边缘调整手柄
   private drawArtboardResizeHandles(): void {
     const ctx = this.ctx;
+    const ox = this.artboardOffsetX;
+    const oy = this.artboardOffsetY;
     const w = this.artboardWidth;
     const h = this.artboardHeight;
     const handleSize = 8;
@@ -5756,10 +5782,10 @@ export class CanvasDrawingEditor extends HTMLElement {
     const resizing = this.artboardResizeEdge;
 
     const edges: Array<{ edge: 'n' | 's' | 'e' | 'w'; x: number; y: number }> = [
-      { edge: 'n', x: w / 2, y: 0 },
-      { edge: 's', x: w / 2, y: h },
-      { edge: 'w', x: 0, y: h / 2 },
-      { edge: 'e', x: w, y: h / 2 },
+      { edge: 'n', x: ox + w / 2, y: oy },
+      { edge: 's', x: ox + w / 2, y: oy + h },
+      { edge: 'w', x: ox, y: oy + h / 2 },
+      { edge: 'e', x: ox + w, y: oy + h / 2 },
     ];
 
     ctx.save();
@@ -5879,8 +5905,8 @@ export class CanvasDrawingEditor extends HTMLElement {
           // 填充画板模式：图片尺寸等于画板尺寸
           width = this.artboardWidth;
           height = this.artboardHeight;
-          x = 0;
-          y = 0;
+          x = this.artboardOffsetX;
+          y = this.artboardOffsetY;
         } else {
           // 原有逻辑：缩放到最大 300px
           const maxSize = 300;
@@ -5891,8 +5917,8 @@ export class CanvasDrawingEditor extends HTMLElement {
             width *= ratio;
             height *= ratio;
           }
-          x = this.artboardEnabled ? (this.artboardWidth - width) / 2 : 100;
-          y = this.artboardEnabled ? (this.artboardHeight - height) / 2 : 100;
+          x = this.artboardEnabled ? this.artboardOffsetX + (this.artboardWidth - width) / 2 : 100;
+          y = this.artboardEnabled ? this.artboardOffsetY + (this.artboardHeight - height) / 2 : 100;
         }
 
         const newObj: ImageObject = {
@@ -6156,6 +6182,7 @@ export class CanvasDrawingEditor extends HTMLElement {
       tempCtx.beginPath();
       tempCtx.rect(0, 0, this.artboardWidth, this.artboardHeight);
       tempCtx.clip();
+      tempCtx.translate(-this.artboardOffsetX, -this.artboardOffsetY);
       this.objects.forEach(obj => this.drawObject(tempCtx, obj));
       tempCtx.restore();
     } else {
@@ -7991,10 +8018,10 @@ export class CanvasDrawingEditor extends HTMLElement {
   private addShapeToCanvas(shape: ShapeConfig): void {
     // 计算画布中心位置
     const centerX = this.artboardEnabled
-      ? this.artboardWidth / 2
+      ? this.artboardOffsetX + this.artboardWidth / 2
       : (this.canvas.width / 2 - this.panOffset.x) / this.scale;
     const centerY = this.artboardEnabled
-      ? this.artboardHeight / 2
+      ? this.artboardOffsetY + this.artboardHeight / 2
       : (this.canvas.height / 2 - this.panOffset.y) / this.scale;
 
     const width = shape.width || 100;
