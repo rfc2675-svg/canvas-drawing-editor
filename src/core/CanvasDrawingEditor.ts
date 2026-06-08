@@ -926,6 +926,9 @@ export class CanvasDrawingEditor extends HTMLElement {
   private artboardOffsetY: number = 0;
   private contextMenuEditingImageId: string | null = null;
 
+  // 自定义字体列表
+  private fonts: Array<{ name: string; family: string }> = [];
+
   // 画板边缘拖拽调整大小状态
   private isResizingArtboard: boolean = false;
   private artboardResizeEdge: 'n' | 's' | 'e' | 'w' | null = null;
@@ -997,7 +1000,7 @@ export class CanvasDrawingEditor extends HTMLElement {
   static get observedAttributes(): string[] {
     return [
       'title', 'tool-config', 'initial-data', 'lang', 'theme-color',
-      'enable-hotzone', 'hotzone-data', 'max-image-size', 'canvas-size',
+      'enable-hotzone', 'hotzone-data', 'max-image-size', 'canvas-size', 'fonts',
       // 旧属性（向后兼容）
       'show-pencil', 'show-rectangle', 'show-circle', 'show-text',
       'show-image', 'show-zoom', 'show-download', 'show-export', 'show-import',
@@ -1055,7 +1058,7 @@ export class CanvasDrawingEditor extends HTMLElement {
     }
 
     // 需要重新渲染 UI 的属性
-    const rerenderAttributes = ['title', 'lang', 'theme-color', 'tool-config', 'enable-hotzone', 'canvas-size',
+    const rerenderAttributes = ['title', 'lang', 'theme-color', 'tool-config', 'enable-hotzone', 'canvas-size', 'fonts',
       'show-pencil', 'show-rectangle', 'show-circle', 'show-text', 'show-image', 'show-zoom',
       'show-download', 'show-export', 'show-import', 'show-color', 'show-clear', 'show-line',
       'show-arrow', 'show-polygon', 'show-undo', 'show-redo', 'show-layers', 'show-group', 'show-align'];
@@ -1194,6 +1197,20 @@ export class CanvasDrawingEditor extends HTMLElement {
 
     // 解析热区数据
     this.parseHotzoneData();
+
+    // 解析自定义字体列表
+    const fontsAttr = this.getAttribute('fonts');
+    if (fontsAttr) {
+      try {
+        const parsed = JSON.parse(fontsAttr);
+        if (Array.isArray(parsed)) {
+          this.fonts = parsed.filter((f: any) => f.name && f.family)
+            .map((f: any) => ({ name: f.name, family: f.family }));
+        }
+      } catch (err) {
+        console.error('Failed to parse fonts:', err);
+      }
+    }
   }
 
   // 解析图片大小限制（支持 KB 和 MB 单位）
@@ -4075,8 +4092,11 @@ export class CanvasDrawingEditor extends HTMLElement {
   }
 
   // 导出画布为 PNG 图片（下载文件）
-  public exportPNG(filename: string = 'canvas-export.png'): void {
+  public async exportPNG(filename: string = 'canvas-export.png'): Promise<void> {
     if (!this.canvas) return;
+
+    // 确保字体加载完成
+    await document.fonts.ready;
 
     if (this.artboardEnabled) {
       const tempCanvas = document.createElement('canvas');
@@ -4111,11 +4131,14 @@ export class CanvasDrawingEditor extends HTMLElement {
     type?: 'dataURL' | 'blob';
     background?: string;
   } = {}): Promise<string | Blob> {
-    return new Promise((resolve, reject) => {
+    return new Promise(async (resolve, reject) => {
       if (!this.canvas) {
         reject(new Error('Canvas not initialized'));
         return;
       }
+
+      // 确保字体加载完成
+      await document.fonts.ready;
 
       const {
         format = 'png',
@@ -4627,6 +4650,15 @@ export class CanvasDrawingEditor extends HTMLElement {
       }
     });
 
+    // 字体选择
+    const fontSelect = this.richTextEditor.querySelector('.rich-text-font-select') as HTMLSelectElement;
+    fontSelect?.addEventListener('change', () => {
+      if (this.selectedSegmentIndex >= 0 && this.richTextSegments[this.selectedSegmentIndex]) {
+        this.richTextSegments[this.selectedSegmentIndex].fontFamily = fontSelect.value;
+        this.updateRichTextSegmentsUI();
+      }
+    });
+
     // 取消按钮
     this.richTextEditor.querySelector('.rich-text-action-btn.cancel')?.addEventListener('click', () => {
       this.hideRichTextEditor();
@@ -4701,6 +4733,7 @@ export class CanvasDrawingEditor extends HTMLElement {
           font-weight: ${seg.bold ? 'bold' : 'normal'};
           font-style: ${seg.italic ? 'italic' : 'normal'};
           font-size: ${Math.min(seg.fontSize || 16, 14)}px;
+          font-family: ${seg.fontFamily || (this.fonts.length > 0 ? this.fonts[0].family : 'sans-serif')};
         ">${seg.bold ? 'B' : ''}${seg.italic ? 'I' : ''} ${seg.fontSize || 16}px</span>
         <button class="rich-text-segment-delete" data-index="${idx}" ${this.richTextSegments.length <= 1 ? 'disabled' : ''}>
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
@@ -4784,6 +4817,10 @@ export class CanvasDrawingEditor extends HTMLElement {
     // 更新字号
     const fontSizeInput = this.richTextEditor.querySelector('.rich-text-fontsize') as HTMLInputElement;
     if (fontSizeInput) fontSizeInput.value = String(segment.fontSize || 16);
+
+    // 更新字体选择
+    const fontSelect = this.richTextEditor.querySelector('.rich-text-font-select') as HTMLSelectElement;
+    if (fontSelect) fontSelect.value = segment.fontFamily || (this.fonts.length > 0 ? this.fonts[0].family : 'sans-serif');
   }
 
   // 显示富文本编辑器
@@ -6191,7 +6228,10 @@ export class CanvasDrawingEditor extends HTMLElement {
   }
 
   // 导出 PNG
-  private exportPng(): void {
+  private async exportPng(): Promise<void> {
+    // 确保字体加载完成
+    await document.fonts.ready;
+
     // 创建临时画布
     const tempCanvas = document.createElement('canvas');
     const tempCtx = tempCanvas.getContext('2d')!;
@@ -7242,6 +7282,9 @@ export class CanvasDrawingEditor extends HTMLElement {
                   </svg>
                 </button>
                 <div class="rich-text-divider"></div>
+                <select class="rich-text-font-select" title="${this.t('fontFamily') || '字体'}">
+                  ${this.fonts.map(f => `<option value="${f.family}">${f.name}</option>`).join('')}
+                </select>
                 <input type="color" class="rich-text-color" value="#000000" title="${this.t('textColor') || '文字颜色'}">
                 <input type="number" class="rich-text-fontsize" value="16" min="8" max="200" title="${this.t('fontSize') || '字号'}">
                 <div class="rich-text-divider"></div>
@@ -8983,6 +9026,18 @@ export class CanvasDrawingEditor extends HTMLElement {
         border-radius: 6px;
         cursor: pointer;
         padding: 2px;
+      }
+
+      .rich-text-font-select {
+        height: 32px;
+        padding: 2px 6px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        font-size: 12px;
+        color: #475569;
+        background: #ffffff;
+        cursor: pointer;
+        max-width: 120px;
       }
 
       .rich-text-fontsize {
