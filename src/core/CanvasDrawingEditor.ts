@@ -7282,9 +7282,11 @@ export class CanvasDrawingEditor extends HTMLElement {
                   </svg>
                 </button>
                 <div class="rich-text-divider"></div>
+                ${this.fonts.length > 0 ? `
                 <select class="rich-text-font-select" title="${this.t('fontFamily') || '字体'}">
                   ${this.fonts.map(f => `<option value="${f.family}">${f.name}</option>`).join('')}
                 </select>
+                ` : ''}
                 <input type="color" class="rich-text-color" value="#000000" title="${this.t('textColor') || '文字颜色'}">
                 <input type="number" class="rich-text-fontsize" value="16" min="8" max="200" title="${this.t('fontSize') || '字号'}">
                 <div class="rich-text-divider"></div>
